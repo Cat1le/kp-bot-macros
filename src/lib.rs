@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
+use quote::quote;
 use syn::{
     parse::{Parse, Parser},
     punctuated::Punctuated,
@@ -36,7 +36,7 @@ struct Entry {
 impl Parse for Entry {
     fn parse(input: parse::ParseStream) -> Result<Self> {
         let name: Ident = input.parse()?;
-        input.parse::<Token![:]>();
+        input.parse::<Token![:]>()?;
         let kind: Ident = input.parse()?;
         let required = input.lookahead1().peek(Token![?]);
         if required {
@@ -84,7 +84,7 @@ fn build_members(entries: Vec<Entry>) -> TokenStream {
         };
         members.push(Field::parse_named.parse2(member).unwrap());
     }
-    quote!(members)
+    quote!(#members)
 }
 
 fn build_args(entries: Vec<Entry>) -> TokenStream {
