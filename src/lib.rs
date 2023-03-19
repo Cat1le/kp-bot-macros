@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::{
     parse::{Parse, Parser},
     punctuated::Punctuated,
@@ -38,10 +38,7 @@ impl Parse for Entry {
         let name: Ident = input.parse()?;
         input.parse::<Token![:]>()?;
         let kind: Ident = input.parse()?;
-        let required = input.lookahead1().peek(Token![?]);
-        if required {
-            input.parse::<Token![?]>()?;
-        }
+        let required = !input.parse::<Token![?]>().is_ok();
         Ok(Self {
             name,
             kind,
@@ -52,24 +49,22 @@ impl Parse for Entry {
 
 #[proc_macro]
 pub fn options(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let Options { name, entries } = parse_macro_input!(input as Options);
-    let members = build_members(entries.clone());
-    let args = build_args(entries.clone());
+    let options = parse_macro_input!(input as Options);
+    let members = build_members(options.clone());
+    let args = build_args(options.clone());
+    let try_from = build_try_from(options.clone());
     quote! {
-        struct #name {
-            #members
-        }
+        #members
 
-        impl #name {
-            fn as_options() -> Vec<serenity::builder::CreateApplicationCommandOption> {
-                vec![#args]
-            }
-        }
+        #args
+
+        #try_from
     }
     .into()
 }
 
-fn build_members(entries: Vec<Entry>) -> TokenStream {
+fn build_members(options: Options) -> TokenStream {
+    let Options { name, entries } = options;
     let mut members = Punctuated::<Field, Token![,]>::new();
     for Entry {
         name,
@@ -84,10 +79,15 @@ fn build_members(entries: Vec<Entry>) -> TokenStream {
         };
         members.push(Field::parse_named.parse2(member).unwrap());
     }
-    quote!(#members)
+    quote! {
+        pub struct #name {
+            #members
+        }
+    }
 }
 
-fn build_args(entries: Vec<Entry>) -> TokenStream {
+fn build_args(options: Options) -> TokenStream {
+    let Options { name, entries } = options;
     let mut args = Punctuated::<Expr, Token![,]>::new();
     for Entry {
         name,
@@ -95,7 +95,7 @@ fn build_args(entries: Vec<Entry>) -> TokenStream {
         required,
     } in entries
     {
-        let name = format!("\"{}\"", name);
+        let name = name.to_string();
         let kind = resolve_kind(kind);
         let arg = quote! {
             serenity::builder::CreateApplicationCommandOption::default()
@@ -107,7 +107,13 @@ fn build_args(entries: Vec<Entry>) -> TokenStream {
         };
         args.push(Expr::parse.parse2(arg).unwrap());
     }
-    quote!(#args)
+    quote! {
+        impl #name {
+            pub fn as_options() -> Vec<serenity::builder::CreateApplicationCommandOption> {
+                vec![#args]
+            }
+        }
+    }
 }
 
 fn resolve_kind(kind: Ident) -> Type {
@@ -118,4 +124,55 @@ fn resolve_kind(kind: Ident) -> Type {
             _ => panic!("Unknown kind {kind}"),
         })
         .unwrap()
+}
+
+fn build_try_from(options: Options) -> TokenStream {
+    let Options { name, entries } = options;
+    let mut defs = Punctuated::<TokenStream, Token![;]>::new();
+    let mut enters = Punctuated::<Ident, Token![,]>::new();
+    for Entry {
+        name,
+        kind,
+        required,
+    } in entries
+    {
+        let name_s = name.to_string();
+        let kind_s = kind.to_string();
+        let stmt = match kind_s.as_str() {
+            "String" => {
+                quote! { let #name = inject(value, #name_s).and_then(|x| x.as_str()).map(|x| x.to_string()) }
+            }
+            "bool" => quote! { let #name = inject(value, #name_s).and_then(|x| x.as_bool()) },
+            _ => unreachable!(),
+        };
+        defs.push(if required {
+            quote! { #stmt.unwrap() }
+        } else {
+            stmt
+        });
+        enters.push(Ident::parse.parse2(name.to_token_stream()).unwrap())
+    }
+    defs.push_punct(parse_quote! { ; });
+    quote! {
+        impl From<&serenity::model::prelude::interaction::application_command::ApplicationCommandInteraction> for #name {
+            fn from(value: &serenity::model::prelude::interaction::application_command::ApplicationCommandInteraction) -> Self {
+                fn inject<'a>(
+                    value: &'a serenity::model::prelude::interaction::application_command::ApplicationCommandInteraction,
+                    name: &'static str,
+                ) -> Option<&'a serenity::json::Value> {
+                    value.data.options.iter().find_map(|x| {
+                        if x.name == name {
+                            x.value.as_ref()
+                        } else {
+                            None
+                        }
+                    })
+                }
+
+                #defs
+
+                Self { #enters }
+            }
+        }
+    }
 }
