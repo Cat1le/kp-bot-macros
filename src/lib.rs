@@ -22,12 +22,16 @@ impl Parse for Options {
             .parse_terminated(Entry::parse, Token![,])?
             .into_iter()
             .collect();
-        Ok(Self { name, entries })
+        Ok(Self {
+            name,
+            entries,
+        })
     }
 }
 
 #[derive(Clone)]
 struct Entry {
+    desc: LitStr,
     name: Ident,
     kind: Ident,
     required: bool,
@@ -35,11 +39,13 @@ struct Entry {
 
 impl Parse for Entry {
     fn parse(input: parse::ParseStream) -> Result<Self> {
+        let desc: LitStr = input.parse()?;
         let name: Ident = input.parse()?;
         input.parse::<Token![:]>()?;
         let kind: Ident = input.parse()?;
         let required = !input.parse::<Token![?]>().is_ok();
         Ok(Self {
+            desc,
             name,
             kind,
             required,
@@ -64,12 +70,13 @@ pub fn options(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 fn build_members(options: Options) -> TokenStream {
-    let Options { name, entries } = options;
+    let Options { name, entries, .. } = options;
     let mut members = Punctuated::<Field, Token![,]>::new();
     for Entry {
         name,
         kind,
         required,
+        ..
     } in entries
     {
         let member = if required {
@@ -87,9 +94,13 @@ fn build_members(options: Options) -> TokenStream {
 }
 
 fn build_args(options: Options) -> TokenStream {
-    let Options { name, entries } = options;
+    let Options {
+        name,
+        entries,
+    } = options;
     let mut args = Punctuated::<Expr, Token![,]>::new();
     for Entry {
+        desc,
         name,
         kind,
         required,
@@ -101,7 +112,7 @@ fn build_args(options: Options) -> TokenStream {
             serenity::builder::CreateApplicationCommandOption::default()
                 .required(#required)
                 .name(#name)
-                .description("Raises help")
+                .description(#desc)
                 .kind(#kind)
                 .to_owned()
         };
@@ -134,6 +145,7 @@ fn build_try_from(options: Options) -> TokenStream {
         name,
         kind,
         required,
+        ..
     } in entries
     {
         let name_s = name.to_string();
