@@ -123,6 +123,12 @@ fn build_args(options: Options) -> TokenStream {
             pub fn as_options() -> Vec<serenity::builder::CreateApplicationCommandOption> {
                 vec![#args]
             }
+
+            pub fn apply(command: &mut serenity::builder::CreateApplicationCommandOption) {
+                #name::as_options()
+                    .into_iter()
+                    .fold(command, |cmd, opt| cmd.add_option(opt))
+            }
         }
     }
 }
