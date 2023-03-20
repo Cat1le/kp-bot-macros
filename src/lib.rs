@@ -124,7 +124,7 @@ fn build_args(options: Options) -> TokenStream {
                 vec![#args]
             }
 
-            pub fn apply(command: &mut serenity::builder::CreateApplicationCommandOption) {
+            pub fn apply(command: &mut serenity::builder::CreateApplicationCommandOption) -> &mut serenity::builder::CreateApplicationCommandOption {
                 #name::as_options()
                     .into_iter()
                     .fold(command, |cmd, opt| cmd.add_option(opt))
